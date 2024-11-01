@@ -1,17 +1,17 @@
-﻿using SentinelProcess.Events;
-using SentinelProcess.Logging;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Events;
 using System.Diagnostics;
 
 namespace SentinelProcess.Core;
 
 public class ProcessEventHandler
 {
-    private readonly ISentinelLogger? _logger;
+    private readonly ILogger? _logger;
 
     public event EventHandler<ProcessOutputEventArgs>? OutputReceived;
     public event EventHandler<ProcessOutputEventArgs>? ErrorReceived;
 
-    public ProcessEventHandler(ISentinelLogger? logger)
+    public ProcessEventHandler(ILogger? logger)
     {
         _logger = logger;
     }
@@ -22,7 +22,7 @@ public class ProcessEventHandler
         {
             if (e.Data != null)
             {
-                _logger?.LogDebug($"Process output: {e.Data}");
+                _logger?.LogDebug(LogEvents.ProcessOutput, "Process output: {Output}", e.Data);
                 OutputReceived?.Invoke(this, new ProcessOutputEventArgs(e.Data));
             }
         };
@@ -31,14 +31,14 @@ public class ProcessEventHandler
         {
             if (e.Data != null)
             {
-                _logger?.LogDebug($"Process error: {e.Data}");
+                _logger?.LogDebug(LogEvents.ProcessError, "Process error: {Error}", e.Data);
                 ErrorReceived?.Invoke(this, new ProcessOutputEventArgs(e.Data));
             }
         };
 
         process.Exited += (s, e) =>
         {
-            _logger?.LogInformation($"Process exited with code: {process.ExitCode}");
+            _logger?.LogInformation(LogEvents.ProcessStopped, "Process exited with code: {ExitCode}", process.ExitCode);
         };
     }
 }

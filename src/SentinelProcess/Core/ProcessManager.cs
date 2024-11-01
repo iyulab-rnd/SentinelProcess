@@ -1,6 +1,6 @@
-﻿using SentinelProcess.Configuration;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Configuration;
 using SentinelProcess.Events;
-using SentinelProcess.Logging;
 using SentinelProcess.Monitoring;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -11,7 +11,7 @@ public class ProcessManager : IDisposable
 {
     private readonly SentinelConfiguration _configuration;
     private readonly ProcessEventHandler _eventHandler;
-    private readonly ISentinelLogger? _logger;
+    private readonly ILogger? _logger;
     private Process? _managedProcess;
     private ProcessState _currentState;
     private bool _disposed;
@@ -32,7 +32,7 @@ public class ProcessManager : IDisposable
     public ProcessManager(
         SentinelConfiguration configuration,
         ProcessEventHandler eventHandler,
-        ISentinelLogger? logger)
+        ILogger? logger)
     {
         _configuration = configuration;
         _eventHandler = eventHandler;
@@ -134,7 +134,8 @@ public class ProcessManager : IDisposable
             }
             catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
             {
-                _logger?.LogWarning("Shutdown timeout reached, forcing process termination");
+                _logger?.LogWarning(LogEvents.ProcessStopping,
+                    "Shutdown timeout reached, forcing process termination");
                 if (!_managedProcess.HasExited)
                 {
                     _managedProcess.Kill(true);
@@ -143,7 +144,7 @@ public class ProcessManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogError("Failed to stop Windows process", ex);
+            _logger?.LogError(LogEvents.ProcessFailed, ex, "Failed to stop Windows process");
             throw;
         }
     }

@@ -1,6 +1,6 @@
-﻿using SentinelProcess.Configuration;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Configuration;
 using SentinelProcess.Core;
-using SentinelProcess.Logging;
 using System.Diagnostics;
 
 namespace SentinelProcess.Monitoring;
@@ -10,7 +10,7 @@ public class ProcessMonitor : IDisposable
     private readonly SentinelConfiguration _configuration;
     private readonly ProcessManager _processManager;
     private readonly ResourceManager _resourceManager;
-    private readonly ISentinelLogger? _logger;
+    private readonly ILogger? _logger;
     private readonly FileSystemWatcher? _parentWatcher;
     private readonly bool _isChildProcess;
     private bool _disposed;
@@ -19,7 +19,7 @@ public class ProcessMonitor : IDisposable
         SentinelConfiguration configuration,
         ProcessManager processManager,
         ResourceManager resourceManager,
-        ISentinelLogger? logger)
+        ILogger? logger)
     {
         _configuration = configuration;
         _processManager = processManager;
@@ -66,12 +66,14 @@ public class ProcessMonitor : IDisposable
             {
                 try
                 {
-                    _logger?.LogWarning("Parent process PID file was deleted. Initiating shutdown.");
+                    _logger?.LogWarning(LogEvents.ParentProcessLost,
+                        "Parent process PID file was deleted. Initiating shutdown.");
+
                     await _processManager.StopAsync(cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogError("Error during file deletion handling", ex);
+                    _logger?.LogError(LogEvents.ProcessFailed, ex, "Error during file deletion handling");
                 }
             };
 

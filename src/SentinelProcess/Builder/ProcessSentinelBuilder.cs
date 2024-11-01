@@ -1,13 +1,13 @@
-﻿using SentinelProcess.Configuration;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Configuration;
 using SentinelProcess.Core;
-using SentinelProcess.Logging;
 
 namespace SentinelProcess.Builder;
 
 public class ProcessSentinelBuilder
 {
     public SentinelConfiguration Configuration { get; } = new();
-    public ISentinelLogger? Logger { get; set; }
+    public ILogger? Logger { get; set; }
 
     public static ProcessSentinelBuilder Create() => new();
 

@@ -1,5 +1,5 @@
-﻿using SentinelProcess.Configuration;
-using SentinelProcess.Logging;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Configuration;
 
 namespace SentinelProcess.Core;
 
@@ -7,7 +7,7 @@ public class ResourceManager : IDisposable
 {
     private readonly SentinelConfiguration _configuration;
     private readonly ProcessManager _processManager;
-    private readonly ISentinelLogger? _logger;
+    private readonly ILogger? _logger;
     private readonly string _pidFilePath;
     private bool _disposed;
 
@@ -16,7 +16,7 @@ public class ResourceManager : IDisposable
     public ResourceManager(
         SentinelConfiguration configuration, 
         ProcessManager processManager,
-        ISentinelLogger? logger)
+        ILogger? logger)
     {
         _configuration = configuration;
         _processManager = processManager;
@@ -41,7 +41,7 @@ public class ResourceManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogError("Failed to save process information", ex);
+            _logger?.LogError(LogEvents.ResourceCleanup, ex, "Failed to save process information");
         }
     }
 
@@ -68,11 +68,14 @@ public class ResourceManager : IDisposable
             if (File.Exists(_pidFilePath))
             {
                 File.Delete(_pidFilePath);
+                _logger?.LogInformation(LogEvents.ResourceCleanup,
+                    "Successfully cleaned up PID file: {PidFile}", _pidFilePath);
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError("Failed to cleanup resources", ex);
+            _logger?.LogError(LogEvents.ResourceCleanup, ex, "Failed to cleanup resources");
+
         }
     }
 

@@ -1,8 +1,7 @@
-﻿using SentinelProcess.Configuration;
+﻿using Microsoft.Extensions.Logging;
+using SentinelProcess.Configuration;
 using SentinelProcess.Events;
-using SentinelProcess.Logging;
 using SentinelProcess.Monitoring;
-using System.Resources;
 
 namespace SentinelProcess.Core;
 
@@ -12,7 +11,7 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
     private readonly ProcessEventHandler _eventHandler;
     private readonly ProcessMonitor _processMonitor;
     private readonly ResourceManager _resourceManager;
-    private readonly ISentinelLogger? _logger;
+    private readonly ILogger? _logger;
     private readonly CancellationTokenSource _cts;
     private bool _disposed;
 
@@ -37,7 +36,7 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
         remove => _processManager.StateChanged -= value;
     }
 
-    public ProcessSentinel(SentinelConfiguration configuration, ISentinelLogger? logger = null)
+    public ProcessSentinel(SentinelConfiguration configuration, ILogger? logger = null)
     {
         Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger;
