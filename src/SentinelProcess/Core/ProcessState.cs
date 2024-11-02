@@ -1,4 +1,4 @@
-﻿namespace SentinelProcess.Monitoring;
+﻿namespace SentinelProcess.Core;
 
 public enum ProcessState
 {

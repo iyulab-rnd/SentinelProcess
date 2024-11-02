@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using SentinelProcess.Configuration;
 using SentinelProcess.Events;
-using SentinelProcess.Monitoring;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -11,6 +10,7 @@ public class ProcessManager : IDisposable
 {
     private readonly SentinelConfiguration _configuration;
     private readonly ProcessEventHandler _eventHandler;
+    private readonly ProcessGroupManager _groupManager;
     private readonly ILogger? _logger;
     private Process? _managedProcess;
     private ProcessState _currentState;
@@ -32,10 +32,12 @@ public class ProcessManager : IDisposable
     public ProcessManager(
         SentinelConfiguration configuration,
         ProcessEventHandler eventHandler,
+        ProcessGroupManager groupManager,
         ILogger? logger)
     {
         _configuration = configuration;
         _eventHandler = eventHandler;
+        _groupManager = groupManager;
         _logger = logger;
         _currentState = ProcessState.NotStarted;
     }
@@ -60,7 +62,7 @@ public class ProcessManager : IDisposable
         State = ProcessState.Stopped;
     }
 
-    private async Task StartProcessAsync(CancellationToken cancellationToken)
+    private Task StartProcessAsync(CancellationToken cancellationToken)
     {
         var startInfo = CreateProcessStartInfo();
         _managedProcess = new Process { StartInfo = startInfo };
@@ -71,8 +73,11 @@ public class ProcessManager : IDisposable
             throw new InvalidOperationException("Failed to start process");
         }
 
+        _groupManager.AssignProcess(_managedProcess);
+
         _managedProcess.BeginOutputReadLine();
         _managedProcess.BeginErrorReadLine();
+        return Task.CompletedTask;
     }
 
     private ProcessStartInfo CreateProcessStartInfo()
@@ -82,14 +87,13 @@ public class ProcessManager : IDisposable
             FileName = _configuration.ExecutablePath,
             Arguments = _configuration.Arguments,
             UseShellExecute = false,
-            CreateNoWindow = _configuration.RunInBackground,
+            CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             RedirectStandardInput = true,
             WorkingDirectory = _configuration.WorkingDirectory ?? Directory.GetCurrentDirectory()
         };
 
-        startInfo.Environment["SENTINEL_PARENT_PID"] = Environment.ProcessId.ToString();
         foreach (var env in _configuration.EnvironmentVariables)
         {
             startInfo.Environment[env.Key] = env.Value;
@@ -103,79 +107,50 @@ public class ProcessManager : IDisposable
         if (_managedProcess == null || _managedProcess.HasExited)
             return;
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            await StopWindowsProcessAsync(cancellationToken);
-        }
-        else
-        {
-            await StopUnixProcessAsync(cancellationToken);
-        }
-    }
-
-    private async Task StopWindowsProcessAsync(CancellationToken cancellationToken)
-    {
-        if (_managedProcess == null) return;
-
         try
         {
-            bool gracefulShutdown = _managedProcess.CloseMainWindow();
-            if (!gracefulShutdown)
+            // Windows와 Unix 플랫폼별로 다른 종료 방식 적용
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                _managedProcess.Kill(true);
+                // Windows: CloseMainWindow 시도
+                bool gracefulShutdown = _managedProcess.CloseMainWindow();
+                _logger?.LogInformation(LogEvents.ProcessStopping,
+                    "Windows process graceful shutdown attempt: {Result}", gracefulShutdown);
+            }
+            else
+            {
+                // Unix: SIGTERM 시그널 전송
+                _managedProcess.Kill(false); // SIGTERM
+                _logger?.LogInformation(LogEvents.ProcessStopping,
+                    "Unix process SIGTERM signal sent to process {ProcessId}", _managedProcess.Id);
             }
 
+            // 프로세스 종료 대기
             using var timeoutCts = new CancellationTokenSource(_configuration.ShutdownTimeout);
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
             try
             {
                 await _managedProcess.WaitForExitAsync(linkedCts.Token);
+                _logger?.LogInformation(LogEvents.ProcessStopped,
+                    "Process exited successfully with code: {ExitCode}", _managedProcess.ExitCode);
             }
             catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
             {
                 _logger?.LogWarning(LogEvents.ProcessStopping,
                     "Shutdown timeout reached, forcing process termination");
+
                 if (!_managedProcess.HasExited)
                 {
-                    _managedProcess.Kill(true);
+                    _managedProcess.Kill(true); // SIGKILL on Unix, forceful termination on Windows
+                    _logger?.LogWarning(LogEvents.ProcessStopping,
+                        "Process forcefully terminated");
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError(LogEvents.ProcessFailed, ex, "Failed to stop Windows process");
-            throw;
-        }
-    }
-
-    private async Task StopUnixProcessAsync(CancellationToken cancellationToken)
-    {
-        if (_managedProcess == null) return;
-
-        try
-        {
-            _managedProcess.Kill(false); // SIGTERM
-
-            using var timeoutCts = new CancellationTokenSource(_configuration.ShutdownTimeout);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-            try
-            {
-                await _managedProcess.WaitForExitAsync(linkedCts.Token);
-            }
-            catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
-            {
-                _logger?.LogWarning("Shutdown timeout reached, sending SIGKILL");
-                if (!_managedProcess.HasExited)
-                {
-                    _managedProcess.Kill(true); // SIGKILL
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError("Failed to stop Unix process", ex);
+            _logger?.LogError(LogEvents.ProcessFailed, ex, "Failed to stop process");
             throw;
         }
     }
@@ -192,7 +167,16 @@ public class ProcessManager : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _managedProcess?.Dispose();
+
+        if (_managedProcess != null)
+        {
+            if (!_managedProcess.HasExited)
+            {
+                StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
+            _managedProcess.Dispose();
+        }
+
         _disposed = true;
     }
 }

@@ -1,16 +1,14 @@
 ﻿using Microsoft.Extensions.Logging;
 using SentinelProcess.Configuration;
 using SentinelProcess.Events;
-using SentinelProcess.Monitoring;
 
 namespace SentinelProcess.Core;
 
-public class ProcessSentinel : IAsyncDisposable, IDisposable
+public class ProcessSentinel : IAsyncDisposable
 {
     private readonly ProcessManager _processManager;
     private readonly ProcessEventHandler _eventHandler;
-    private readonly ProcessMonitor _processMonitor;
-    private readonly ResourceManager _resourceManager;
+    private readonly ProcessGroupManager _groupManager;
     private readonly ILogger? _logger;
     private readonly CancellationTokenSource _cts;
     private bool _disposed;
@@ -43,9 +41,10 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
         _cts = new CancellationTokenSource();
 
         _eventHandler = new ProcessEventHandler(logger);
-        _processManager = new ProcessManager(configuration, _eventHandler, logger);
-        _resourceManager = new ResourceManager(configuration, _processManager, logger);
-        _processMonitor = new ProcessMonitor(configuration, _processManager, _resourceManager, logger);
+        _groupManager = new ProcessGroupManager(configuration.ProcessName, logger);
+        _processManager = new ProcessManager(configuration, _eventHandler, _groupManager, logger);
+
+        RegisterShutdownHooks();
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -56,8 +55,7 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
             await _processManager.StartAsync(linkedCts.Token);
-            await _processMonitor.StartMonitoringAsync(linkedCts.Token);
-            _resourceManager.RegisterShutdownHooks(_cts.Token);
+            _logger?.LogInformation(LogEvents.MonitoringStarted, "Process sentinel started");
         }
         catch (Exception)
         {
@@ -70,27 +68,21 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
     {
         ThrowIfDisposed();
         await _processManager.StopAsync(cancellationToken);
+        _logger?.LogInformation(LogEvents.MonitoringStopped, "Process sentinel stopped");
     }
 
-    public void Dispose()
+    private void RegisterShutdownHooks()
     {
-        Dispose(disposing: true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (_disposed) return;
-
-        if (disposing)
+        AppDomain.CurrentDomain.ProcessExit += async (s, e) =>
         {
-            _cts.Dispose();
-            _processManager.Dispose();
-            _processMonitor.Dispose();
-            _resourceManager.Dispose();
-        }
+            await StopAsync();
+        };
 
-        _disposed = true;
+        Console.CancelKeyPress += async (s, e) =>
+        {
+            e.Cancel = true;
+            await StopAsync();
+        };
     }
 
     public async ValueTask DisposeAsync()
@@ -103,7 +95,10 @@ public class ProcessSentinel : IAsyncDisposable, IDisposable
         }
         finally
         {
-            Dispose(disposing: true);
+            _cts.Dispose();
+            _processManager.Dispose();
+            _groupManager.Dispose();
+            _disposed = true;
         }
 
         GC.SuppressFinalize(this);

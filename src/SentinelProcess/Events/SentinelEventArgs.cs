@@ -1,4 +1,4 @@
-﻿using SentinelProcess.Monitoring;
+﻿using SentinelProcess.Core;
 using System.Diagnostics;
 
 namespace SentinelProcess.Events;
